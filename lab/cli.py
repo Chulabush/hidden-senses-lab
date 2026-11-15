@@ -15,9 +15,21 @@ def open_store(cfg, mock: bool) -> Store:
     return Store(path.with_name("mock.sqlite") if mock else path)
 
 
-def ready(cfg, mock: bool) -> list:
+def chosen(cfg, args, mock: bool = False) -> list:
+    """The configured labs, narrowed by --labs if given."""
+    labs = providers.build(cfg, mock)
+    if args.labs:
+        want = [n.strip() for n in args.labs.split(",") if n.strip()]
+        unknown = [n for n in want if n not in {p.name for p in labs}]
+        if unknown:
+            raise SystemExit(f"--labs: no such lab {', '.join(unknown)} (configured: {', '.join(p.name for p in labs)})")
+        labs = [p for p in labs if p.name in want]
+    return labs
+
+
+def ready(cfg, args) -> list:
     labs = []
-    for p in providers.build(cfg, mock):
+    for p in chosen(cfg, args, args.mock):
         reason = p.missing()
         if reason:
             print(f"  skipping {p.name}: {reason}")
@@ -58,7 +70,7 @@ def cmd_doctor(cfg, args):
         return line
 
     async def go():
-        for line in await asyncio.gather(*(check(p) for p in providers.build(cfg))):
+        for line in await asyncio.gather(*(check(p) for p in chosen(cfg, args))):
             print(line)
 
     asyncio.run(go())
@@ -77,7 +89,7 @@ def cmd_plan(cfg, args):
 
 def cmd_run(cfg, args):
     store = open_store(cfg, args.mock)
-    labs = ready(cfg, args.mock)
+    labs = ready(cfg, args)
     done = store.done_ids()
     seats = [s for s in agenda.sample(args.seats, int(cfg["run"].get("seed", 7))) if s.id not in done]
     if not seats:
@@ -96,7 +108,7 @@ def cmd_run(cfg, args):
 
 def cmd_synthesize(cfg, args):
     store = open_store(cfg, args.mock)
-    labs = ready(cfg, args.mock)
+    labs = ready(cfg, args)
     text = asyncio.run(pipeline.synthesize(labs, cfg["run"].get("lead", ""), store, budget(cfg), args.top))
     lines = ["# Hidden Senses Lab: research programme", "", text, "", "## Top hypotheses", "",
              "| Seat | Score | Proposed by | Sense | Link to the unseen |", "|---|---|---|---|---|"]
@@ -105,7 +117,7 @@ def cmd_synthesize(cfg, args):
     lines += [f"| {u['provider']} | {u['calls']} | {u['tin']:,} | {u['tout']:,} |" for u in store.usage()]
     out = Path(store.db.execute("PRAGMA database_list").fetchone()[2]).with_name(
         "mock-report.md" if args.mock else "report.md")
-    out.write_text("\n".join(lines) + "\n")
+    out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"Wrote {out}")
 
 
@@ -134,7 +146,7 @@ def cmd_consult(cfg, args):
     if not args.source:
         print(pipeline.consult_prompt(store, args.seat))
         return
-    text = Path(args.file).read_text() if args.file else sys.stdin.read()
+    text = Path(args.file).read_text(encoding="utf-8") if args.file else sys.stdin.read()
     if not text.strip():
         raise SystemExit("The reply is empty.")
     reply = providers.Reply(text.strip(), 0, len(text) // 4, f"{args.source} (pasted from chat)")
@@ -142,7 +154,7 @@ def cmd_consult(cfg, args):
     if args.seat == 0:
         report = Path(store.db.execute("PRAGMA database_list").fetchone()[2]).with_name("report.md")
         if report.exists():
-            with report.open("a") as f:
+            with report.open("a", encoding="utf-8") as f:
                 f.write(f"\n## Outside review from {args.source}\n\n{text.strip()}\n")
         print(f"Saved {args.source}'s review of the research programme.")
     else:
@@ -153,6 +165,7 @@ def cmd_consult(cfg, args):
 def main():
     ap = argparse.ArgumentParser(prog="lab", description="Hidden Senses Lab: Claude, ChatGPT and Gemini as one research group")
     ap.add_argument("--config", default="lab.toml")
+    ap.add_argument("--labs", help="use only these labs, comma-separated, e.g. claude,gemini")
     sub = ap.add_subparsers(dest="cmd", required=True)
     d = sub.add_parser("doctor", help="check keys and list the models each key can use")
     d.add_argument("--ping", action="store_true", help="also send one tiny request to each lab")
@@ -173,6 +186,8 @@ def main():
     for q in (r, s, t, w, c):
         q.add_argument("--mock", action="store_true", help="offline simulation, no keys, no cost")
     args = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # model output is full of symbols a Windows console cannot encode
+        stream.reconfigure(encoding="utf-8", errors="replace")
     cfg = config.load(args.config)
     {"doctor": cmd_doctor, "plan": cmd_plan, "run": cmd_run, "synthesize": cmd_synthesize,
      "status": cmd_status, "show": cmd_show, "consult": cmd_consult}[args.cmd](cfg, args)

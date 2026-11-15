@@ -30,43 +30,48 @@ python3 -m venv .venv
 There are two ways to connect the three models. Both write to the same database, so you can start with
 one and continue with the other.
 
-### Route A: Claude subscription (no API keys) — `lab.cli.toml`
+### Route A: chat subscriptions (no API keys) — `lab.cli.toml`
 
-This drives Claude's command-line tool, logged in with your Claude subscription. Install it once
-(needs a recent Node.js; checked with Node 22) and log in on the machine that will run the lab:
-
-```bash
-npm install -g @anthropic-ai/claude-code
-```
-```bash
-claude
-```
-
-Then check it and run a first small batch:
+This drives each vendor's command-line tool, logged in with your subscription: `claude`, `codex`
+(ChatGPT) and `gemini`. This route needs only Python 3.11+ and the tools themselves; skip the `pip`
+step above. Install the tools once (needs a recent Node.js) and log in to each:
 
 ```bash
-.venv/bin/python -m lab --config lab.cli.toml doctor --ping
-```
-```bash
-.venv/bin/python -m lab --config lab.cli.toml run --seats 6
+npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
 ```
 
-With Claude as the only lab, it reviews and scores its own hypotheses from two opposed stances
-(experimentalist and theorist). The command names no model, so it uses your subscription's default.
-
-**Bringing in ChatGPT and Gemini by hand.** Print a ready-to-paste prompt for a seat (or `0` for the
-research programme), paste it into a ChatGPT or Gemini chat, then save the answer:
+Check all three, then run a first small batch:
 
 ```bash
-.venv/bin/python -m lab --config lab.cli.toml consult 322
+python -m lab --config lab.cli.toml doctor --ping
 ```
 ```bash
-.venv/bin/python -m lab --config lab.cli.toml consult 322 --from chatgpt --file reply.txt
+python -m lab --config lab.cli.toml run --seats 6
 ```
 
-Their review joins the seat's conversation, and their score counts toward the seat's ranking. To make
-ChatGPT and Gemini full automatic labs instead, uncomment their blocks in `lab.cli.toml` and log in to
-`codex` and `gemini` (`npm install -g @openai/codex @google/gemini-cli`); those two are untested.
+On Windows, use `py` in place of `python`. To leave a lab out of a run (for example while its usage
+limit resets), name the ones you want:
+
+```bash
+python -m lab --config lab.cli.toml --labs claude,gemini run --seats 6
+```
+
+No model is named in the commands, so each tool uses your subscription's default model. With a single
+lab, it reviews and scores its own hypotheses from two opposed stances (experimentalist and theorist).
+Only the Claude tool has been run for real so far; the Codex and Gemini commands were written from
+their help text and have not been exercised with a login.
+
+**Bringing in another assistant by hand.** Print a ready-to-paste prompt for a seat (or `0` for the
+research programme), paste it into any chat window, then save the answer:
+
+```bash
+python -m lab --config lab.cli.toml consult 322
+```
+```bash
+python -m lab --config lab.cli.toml consult 322 --from chatgpt --file reply.txt
+```
+
+Their review joins the seat's conversation, and their score counts toward the seat's ranking.
 
 What to expect on this route:
 

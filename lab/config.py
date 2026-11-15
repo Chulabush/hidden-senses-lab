@@ -7,7 +7,7 @@ from pathlib import Path
 def load_env(path: Path) -> None:
     if not path.exists():
         return
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -19,7 +19,7 @@ def load_env(path: Path) -> None:
 def load(path: str) -> dict:
     cfg_path = Path(path)
     load_env(cfg_path.parent / ".env")
-    cfg = tomllib.loads(cfg_path.read_text())
+    cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
     cfg["_root"] = cfg_path.parent
     if not cfg.get("providers"):
         raise SystemExit(f"{path}: no [providers.*] sections")

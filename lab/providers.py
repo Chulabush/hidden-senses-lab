@@ -181,10 +181,14 @@ class CommandProvider(Provider):
 
     async def _call(self, system, prompt, kind):
         # Run in an empty folder so the CLI's agent has no files to wander into.
-        with tempfile.TemporaryDirectory() as work:
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
             out_file = os.path.join(work, "reply.txt")
             takes_system = "{system}" in self.command
-            argv = [system if a == "{system}" else a.replace("{out}", out_file) for a in self.command]
+            # As an argument the system prompt goes on one line: Windows command shims break on newlines.
+            one_line = " ".join(system.split())
+            argv = [one_line if a == "{system}" else a.replace("{out}", out_file) for a in self.command]
+            # Use the full path, so Windows finds npm's .cmd launchers.
+            argv[0] = shutil.which(argv[0]) or argv[0]
             stdin = prompt if takes_system else f"{system}\n\n---\n\n{prompt}"
             async with self.procs or asyncio.Semaphore(1):
                 proc = await asyncio.create_subprocess_exec(
