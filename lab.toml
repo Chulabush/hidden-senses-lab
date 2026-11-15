@@ -1,0 +1,31 @@
+# Hidden Senses Lab configuration
+
+[run]
+db = "runs/lab.sqlite"
+concurrency = 12            # research seats worked on at the same time
+max_calls = 600             # hard stop: total model calls per `run` invocation
+max_output_tokens = 3000000 # hard stop: total output tokens per `run` invocation
+seed = 7                    # controls which seats a partial run samples
+lead = "claude"             # writes the synthesis; the others review it
+
+# Each provider is one "lab". Seats rotate the proposer across labs, and the
+# other labs critique and score, so every hypothesis passes through all three.
+# Model IDs change often: run `python -m lab doctor` to see what your key can use.
+
+[providers.claude]
+kind = "anthropic"
+model = "claude-opus-5-5"   # for cheaper breadth runs: "claude-sonnet-5-5" or "claude-haiku-5-5"
+effort = "medium"           # low | medium | high | xhigh | max
+concurrency = 4
+
+[providers.chatgpt]
+kind = "openai"
+model = "gpt-5.6-sol"       # verify with `doctor`
+concurrency = 4
+
+[providers.gemini]
+kind = "gemini"
+model = "gemini-3.5-flash"  # verify with `doctor`
+concurrency = 4
+
+# Subscription route (no API keys): use lab.cli.toml instead of this file.

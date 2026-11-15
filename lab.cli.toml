@@ -1,0 +1,32 @@
+# Hidden Senses Lab: subscription route.
+# Uses Claude's command-line tool, logged in with your Claude subscription. No API keys.
+# No model is named in the command, so it follows whatever model your subscription uses.
+#   python -m lab --config lab.cli.toml doctor --ping
+#   python -m lab --config lab.cli.toml run --seats 6
+
+[run]
+db = "runs/lab.sqlite"
+concurrency = 3             # seats in progress at once
+cli_processes = 2           # command-line tools alive at once; set to 1 on a very small machine
+max_calls = 90              # per run; subscriptions have usage limits, so go in small batches
+max_output_tokens = 1000000
+seed = 7
+lead = "claude"
+
+# "{system}" passes the lab's system prompt as its own argument; "{out}" is a temp file for the reply.
+# Each tool runs in an empty temp folder with its own tools switched off or read-only.
+
+[providers.claude]
+kind = "command"
+command = ["claude", "-p", "--tools", "", "--no-session-persistence", "--system-prompt", "{system}"]
+
+# Optional: add ChatGPT and Gemini as full labs by uncommenting these and logging in to each tool.
+# Without them, Claude reviews its own work from two opposed stances, and you can still bring in
+# ChatGPT and Gemini by hand with `python -m lab --config lab.cli.toml consult SEAT`.
+# [providers.chatgpt]
+# kind = "command"
+# command = ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral", "--color", "never", "-o", "{out}", "-"]
+
+# [providers.gemini]
+# kind = "command"
+# command = ["gemini", "--skip-trust", "-o", "text", "-p", "Answer the request above in plain text. Do not use any tools."]
