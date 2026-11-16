@@ -36,16 +36,16 @@ def brief(seat) -> str:
 
 
 def parse_scores(text: str) -> dict | None:
-    match = re.search(r"\{.*\}", text, re.S)
-    if not match:
-        return None
-    try:
-        data = json.loads(match.group(0))
-        scores = {k: max(1, min(10, int(data[k]))) for k in SCORE_KEYS}
-    except (ValueError, KeyError, TypeError):
-        return None
-    scores["one_line"] = str(data.get("one_line", ""))[:300]
-    return scores
+    # A review may contain other braces (LaTeX such as \text{...}), so try each flat {...} block, last first.
+    for block in reversed(re.findall(r"\{[^{}]*\}", text)):
+        try:
+            data = json.loads(block)
+            scores = {k: max(1, min(10, int(data[k]))) for k in SCORE_KEYS}
+        except (ValueError, KeyError, TypeError):
+            continue
+        scores["one_line"] = str(data.get("one_line", ""))[:300]
+        return scores
+    return None
 
 
 async def ask(store, budget, provider, seat_id, step, prompt) -> str:
