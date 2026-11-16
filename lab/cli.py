@@ -91,7 +91,12 @@ def cmd_run(cfg, args):
     store = open_store(cfg, args.mock)
     labs = ready(cfg, args)
     done = store.done_ids()
-    seats = [s for s in agenda.sample(args.seats, int(cfg["run"].get("seed", 7))) if s.id not in done]
+    words = {k: [w.strip().lower() for w in (getattr(args, k) or "").split(",") if w.strip()]
+             for k in ("sense", "portal", "role")}
+    picked = agenda.sample(args.seats, int(cfg["run"].get("seed", 7)), **words)
+    if not picked:
+        raise SystemExit("No seat matches --sense/--portal/--role. The texts to match are listed in lab/agenda.py.")
+    seats = [s for s in picked if s.id not in done]
     if not seats:
         print("All requested seats are already done. Raise --seats to go further.")
         return
@@ -173,6 +178,8 @@ def main():
     p.add_argument("--seats", type=int)
     r = sub.add_parser("run", help="work research seats (resumes where it stopped)")
     r.add_argument("--seats", type=int, default=30)
+    for key, example in (("sense", "songbirds,fruit flies"), ("portal", "axion,dark photons"), ("role", "quantum")):
+        r.add_argument(f"--{key}", help=f"only seats whose {key} contains one of these keywords, e.g. \"{example}\"")
     s = sub.add_parser("synthesize", help="turn the best hypotheses into a research programme")
     t = sub.add_parser("status", help="progress, usage and current leaders")
     w = sub.add_parser("show", help="print the full conversation for one seat")

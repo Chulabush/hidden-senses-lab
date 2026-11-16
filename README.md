@@ -56,6 +56,13 @@ limit resets), name the ones you want:
 python -m lab --config lab.cli.toml --labs claude,gemini run --seats 6
 ```
 
+To aim a run at part of the agenda, filter by keyword (comma-separated, any one may match; the texts
+are in `lab/agenda.py`). `--seats` then counts within the matching seats:
+
+```bash
+python -m lab --config lab.cli.toml run --seats 6 --sense "songbirds,fruit flies,monarch" --portal "axion,dark photons" --role quantum
+```
+
 No model is named in the commands, so each tool uses your subscription's default model. With a single
 lab, it reviews and scores its own hypotheses from two opposed stances (experimentalist and theorist).
 Only the Claude tool has been run for real so far; the Codex and Gemini commands were written from

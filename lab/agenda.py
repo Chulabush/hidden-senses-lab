@@ -74,8 +74,16 @@ def all_seats() -> list[Seat]:
     return [Seat(i, s, p, r) for i, (s, p, r) in enumerate(product(SENSES, PORTALS, ROLES), start=1)]
 
 
-def sample(n: int, seed: int) -> list[Seat]:
-    """A stable shuffled order, so a small run still spans the whole space."""
+def sample(n: int, seed: int, sense=(), portal=(), role=()) -> list[Seat]:
+    """A stable shuffled order, so a small run still spans the whole space.
+
+    sense, portal and role are optional lists of lowercase keywords; a seat is kept when each
+    non-empty list has at least one keyword found in the matching text.
+    """
     seats = all_seats()
     random.Random(seed).shuffle(seats)
-    return seats[:n]
+
+    def keep(text: str, words) -> bool:
+        return not words or any(w in text.lower() for w in words)
+
+    return [s for s in seats if keep(s.sense, sense) and keep(s.portal, portal) and keep(s.role, role)][:n]
