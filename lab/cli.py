@@ -4,10 +4,10 @@ import asyncio
 import sys
 from pathlib import Path
 
-from . import agenda, config, pipeline, providers
+from . import agenda, config, pipeline, providers, swarm_scout
 from .store import Store
 
-CALLS_PER_SEAT = 6  # propose + 2 critiques + revise + 2 scores
+CALLS_PER_SEAT = 5  # screen, propose, critique, revise, judge
 
 
 def open_store(cfg, mock: bool) -> Store:
@@ -20,6 +20,8 @@ def chosen(cfg, args, mock: bool = False) -> list:
     labs = providers.build(cfg, mock)
     if args.labs:
         want = [n.strip() for n in args.labs.split(",") if n.strip()]
+        if any(p.name == "codex" for p in labs):
+            want = ["codex" if name == "chatgpt" else name for name in want]
         unknown = [n for n in want if n not in {p.name for p in labs}]
         if unknown:
             raise SystemExit(f"--labs: no such lab {', '.join(unknown)} (configured: {', '.join(p.name for p in labs)})")
@@ -36,7 +38,7 @@ def ready(cfg, args) -> list:
         else:
             labs.append(p)
     if not labs:
-        raise SystemExit("No lab is ready. Add keys to .env (see .env.example), or try the pipeline with --mock.")
+        raise SystemExit("No lab is ready. Run doctor --ping to check CLI installations and credentials, or try --mock.")
     print("  labs in this run: " + ", ".join(f"{p.name} ({p.model or p.kind})" for p in labs))
     return labs
 
@@ -103,12 +105,50 @@ def cmd_run(cfg, args):
     b = budget(cfg)
     print(f"  working {len(seats)} seats ({len(done)} already done)")
     stats = asyncio.run(pipeline.run(seats, labs, store, b, int(cfg["run"].get("concurrency", 12))))
-    print(f"Finished: {stats['done']} seats done, {stats['failed']} failed, {b.calls} calls, {b.out:,} output tokens.")
+    print(f"Finished: {stats['done']} seats done, {stats.get('rejected', 0)} rejected, {stats['failed']} failed, {b.calls} calls, {b.out:,} output tokens.")
     if stats["streak"] >= pipeline.MAX_FAILURE_STREAK:
         print("Stopped after repeated failures (see above): usually a usage limit or a logged-out tool."
               " Run again later; finished seats are kept and failed ones are retried.")
     elif stats["stopped"]:
         print("Stopped at the budget limit in the config. Run again to continue where it left off.")
+
+
+def cmd_scout(cfg, args):
+    # An explicit scout worker limit also bounds the CLI subprocesses for this command.
+    cfg = {**cfg, "run": {**cfg["run"], "cli_processes": args.concurrency}}
+    store = open_store(cfg, args.mock)
+    labs = ready(cfg, args)
+    settings = cfg["run"]
+    scout_budget = pipeline.Budget(
+        settings.get("scout_max_calls", args.count * len(labs)),
+        settings.get("scout_max_output_tokens", settings.get("max_output_tokens", 1_000_000)),
+    )
+
+    async def execute():
+        saved, failed = await swarm_scout.scout(
+            store, labs, args.count, args.concurrency, int(settings.get("seed", 7)), scout_budget,
+        )
+        print(f"Scout: {saved} new candidates, {failed} invalid responses, {scout_budget.calls} calls.")
+        if args.promote_top:
+            seats = swarm_scout.promotion_seats(store, args.promote_top)
+            result = await pipeline.run(seats, labs, store, budget(cfg), args.concurrency)
+            print(f"Promotion: {result['done']} done, {result.get('rejected', 0)} rejected, {result['failed']} failed.")
+
+    asyncio.run(execute())
+
+
+def nonnegative_int(value):
+    number = int(value)
+    if number < 0:
+        raise argparse.ArgumentTypeError("must be nonnegative")
+    return number
+
+
+def positive_int(value):
+    number = nonnegative_int(value)
+    if not number:
+        raise argparse.ArgumentTypeError("must be positive")
+    return number
 
 
 def cmd_synthesize(cfg, args):
@@ -133,7 +173,7 @@ def cmd_status(cfg, args):
     for u in store.usage():
         print(f"{u['provider']:8} {u['calls']} calls, {u['tin']:,} in / {u['tout']:,} out tokens")
     for r in store.top(args.top):
-        print(f"  seat {r['id']:5} score {r['score']:5}  {r['sense'].split(':')[0]}  x  {r['portal'].split(':')[0][:60]}")
+        print(f"  seat {r['id']:5} normalized_score={r['score']/10:.3f}  gap_orders={r['gap_orders']}  loophole_class={r['loophole_class']}  {r['sense'].split(':')[0]}  x  {r['portal'].split(':')[0][:60]}")
 
 
 def cmd_show(cfg, args):
@@ -180,6 +220,10 @@ def main():
     r.add_argument("--seats", type=int, default=30)
     for key, example in (("sense", "songbirds,fruit flies"), ("portal", "axion,dark photons"), ("role", "quantum")):
         r.add_argument(f"--{key}", help=f"only seats whose {key} contains one of these keywords, e.g. \"{example}\"")
+    scout = sub.add_parser("scout", help="screen the visual-system discovery matrix")
+    scout.add_argument("--count", type=nonnegative_int, default=1000)
+    scout.add_argument("--concurrency", type=positive_int, default=2)
+    scout.add_argument("--promote-top", type=nonnegative_int, default=0)
     s = sub.add_parser("synthesize", help="turn the best hypotheses into a research programme")
     t = sub.add_parser("status", help="progress, usage and current leaders")
     w = sub.add_parser("show", help="print the full conversation for one seat")
@@ -190,11 +234,11 @@ def main():
     c.add_argument("--file", help="file holding the pasted reply (default: read it from standard input)")
     for q in (s, t):
         q.add_argument("--top", type=int, default=30)
-    for q in (r, s, t, w, c):
+    for q in (r, s, t, w, c, scout):
         q.add_argument("--mock", action="store_true", help="offline simulation, no keys, no cost")
     args = ap.parse_args()
     for stream in (sys.stdout, sys.stderr):  # model output is full of symbols a Windows console cannot encode
         stream.reconfigure(encoding="utf-8", errors="replace")
     cfg = config.load(args.config)
     {"doctor": cmd_doctor, "plan": cmd_plan, "run": cmd_run, "synthesize": cmd_synthesize,
-     "status": cmd_status, "show": cmd_show, "consult": cmd_consult}[args.cmd](cfg, args)
+     "scout": cmd_scout, "status": cmd_status, "show": cmd_show, "consult": cmd_consult}[args.cmd](cfg, args)

@@ -115,3 +115,33 @@ everything offline at no cost.
 
 Spending is capped per run by `max_calls` and `max_output_tokens` in `lab.toml`. A run that hits the cap
 stops cleanly and resumes next time. Model IDs are set per lab in `lab.toml`.
+
+## Scout matrix and cloud runs
+
+Use Python 3.11 or newer. The subscription route uses the installed `claude`, `codex`,
+and `gemini` executables. Sign into each CLI you plan to use and check it with
+`py -m lab --config lab.cli.toml doctor --ping` on Windows. Missing CLIs are skipped.
+The roundtable screens each premise before proposing, critiquing, revising, and scoring it.
+A rate-limited provider stays out of rotation until the reported reset time (five minutes
+if the CLI omits one). With a single provider, that provider fills each role.
+
+```powershell
+py -m lab --config lab.cli.toml scout --count 1000 --concurrency 2 --promote-top 3
+py -m lab --config lab.cli.toml status
+```
+
+The scout saves one result per visual system, coupling class, and amplifier combination.
+`--count` selects up to that many unscored combinations. Repeat the command to continue.
+Use `--count 0 --promote-top N` to promote saved candidates without scouting again.
+The status command ranks completed seats by their normalized judge scores and uses the
+lowest recorded gap to break ties. A gap can be conditional on the judge's stated
+source benchmark. Compare those assumptions before interpreting gaps across seats.
+
+On an Ubuntu 24.04+ VM, `bash deploy/ubuntu_setup.sh` installs dependencies and starts
+a detached tmux session with a 25-worker scout. Authenticate the tools under the VM's
+user account. If you use `deploy/push_auth_to_cloud.ps1`, run it only against a trusted
+VM account because it copies CLI directories that can include credentials and session
+history. Some credentials can require a fresh login on the VM. Restart the tmux session
+if the initial run paused before authentication. Stop local lab writers before using
+`deploy/pull_results.ps1`, which snapshots the cloud database, backs up any local
+database, imports the snapshot, then runs status and synthesis.

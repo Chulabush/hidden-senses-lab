@@ -1,31 +1,22 @@
-# Hidden Senses Lab: subscription route.
-# Uses the vendors' command-line tools, each logged in with your subscription. No API keys.
-# No model is named in the commands, so each tool uses your subscription's default model.
-#   python -m lab --config lab.cli.toml doctor --ping
-#   python -m lab --config lab.cli.toml --labs claude,gemini run --seats 6
-
+# Subscription CLIs take prompts on stdin.
 [run]
 db = "runs/lab.sqlite"
-concurrency = 3             # seats in progress at once
-cli_processes = 2           # command-line tools alive at once; set to 1 on a very small machine
-max_calls = 90              # per run; subscriptions have usage limits, so go in small batches
+concurrency = 2
+cli_processes = 2
+timeout_seconds = 180
+max_calls = 90
 max_output_tokens = 1000000
 seed = 7
 lead = "claude"
 
-# "{system}" passes the lab's system prompt as its own argument; "{out}" is a temp file for the reply.
-# Each tool runs in an empty temp folder with its own tools switched off or read-only.
-
 [providers.claude]
 kind = "command"
-command = ["claude", "-p", "--tools", "", "--no-session-persistence", "--system-prompt", "{system}"]
+command = ["claude", "-p", "--output-format", "json", "--tools", "", "--no-session-persistence"]
 
-# ChatGPT (through the Codex tool) and Gemini, each logged in with its own subscription.
-# To leave one out for a run, use --labs, e.g.  python -m lab --config lab.cli.toml --labs claude,gemini run
-[providers.chatgpt]
+[providers.codex]
 kind = "command"
-command = ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only", "--ephemeral", "--color", "never", "-o", "{out}", "-"]
+command = ["codex", "exec", "--ephemeral", "-s", "read-only", "--skip-git-repo-check", "--ignore-user-config", "--color", "never", "-o", "{out}", "-"]
 
 [providers.gemini]
 kind = "command"
-command = ["gemini", "--skip-trust", "-o", "text", "-p", "Answer the request above in plain text. Do not use any tools."]
+command = ["gemini", "-p", "Answer the request supplied on stdin. Do not use tools.", "--output-format", "json"]

@@ -3,6 +3,9 @@ import asyncio
 import json
 import re
 
+from .providers import ProviderError
+from .router import ROLES, SwarmRouter
+
 SYSTEM = """You are one researcher in a three-lab collaboration (Claude, ChatGPT and Gemini) working on an open question: \
 could some animals sense parts of reality that humans and today's instruments miss, in particular a dark sector \
 (dark matter and whatever forces it may carry)?
@@ -35,51 +38,70 @@ def brief(seat) -> str:
     return f"Animal sense: {seat.sense}\nPossible link to the unseen: {seat.portal}\nYour discipline: {seat.role}"
 
 
-def parse_scores(text: str) -> dict | None:
+def parse_scores(text: str, *, legacy=False) -> dict | None:
     # A review may contain other braces (LaTeX such as \text{...}), so try each flat {...} block, last first.
     for block in reversed(re.findall(r"\{[^{}]*\}", text)):
         try:
             data = json.loads(block)
+            gap = data.get("gap_orders")
+            category = data.get("loophole_class")
+            model = data.get("judge_model")
+            if not legacy or any(v is not None for v in (gap, category, model)):
+                if (type(gap) is not int or not -(2**63) <= gap < 2**63
+                        or category not in LOOPS or not isinstance(model, str) or not model.strip()):
+                    continue
             scores = {k: max(1, min(10, int(data[k]))) for k in SCORE_KEYS}
         except (ValueError, KeyError, TypeError):
             continue
+        scores.update(gap_orders=gap, loophole_class=category, judge_model=model)
         scores["one_line"] = str(data.get("one_line", ""))[:300]
         return scores
     return None
 
 
-async def ask(store, budget, provider, seat_id, step, prompt) -> str:
+async def ask(store, budget, provider, seat_id, step, prompt, *, record=True) -> str:
     budget.take()
     reply = await provider.complete(SYSTEM, prompt, step.split(":")[0])
     budget.out += reply.out_tokens
-    store.add_message(seat_id, step, provider.name, reply)
+    if record:
+        store.add_message(seat_id, step, provider.name, reply)
     return reply.text
 
 
-# With a single lab connected, it reviews its own work from two opposed stances.
-SOLO_REVIEWERS = [
-    ("experimentalist", "Review as a bench experimentalist who has to build the apparatus and beat the noise."),
-    ("theorist", "Review as a theorist who checks every coupling, estimate and existing bound."),
-]
+LOOPS = {
+    "A": "Mirror or atomic dark matter and kinetic mixing with specialized photoreceptors.",
+    "B": "Ultralight axion wave spin resonance and cryptochrome radical pairs.",
+    "C": "Coherent bosonic wave phase interference in densely packed retinal arrays.",
+    "D": "Macroscopic dark nuggets or topological defects generating transient ocular photons.",
+}
 
 
-def reviewers(providers, proposer) -> list[tuple]:
-    """(provider, label, stance) for each reviewer of a seat."""
-    others = [p for p in providers if p is not proposer]
-    if others:
-        return [(p, p.name, "") for p in others]
-    return [(proposer, label, stance + " ") for label, stance in SOLO_REVIEWERS]
+async def routed_ask(store, budget, providers, router, preferred, seat_id, step, prompt, avoid=(), *, record=True):
+    ordered = sorted(providers, key=lambda p: (p.name in avoid, p is not preferred))
+    for provider in ordered:
+        if not router.active(provider):
+            continue
+        role = ROLES.get(provider.name, "Interdisciplinary researcher.")
+        try:
+            text = await ask(store, budget, provider, seat_id, step, f"Your specialty: {role}\n\n{prompt}", record=record)
+            return text, provider
+        except (ProviderError, OSError) as exc:
+            router.failed(provider, exc)
+    raise ProviderError("No provider active. Check doctor --ping or retry after the logged cooldown.")
 
 
 def rescore(store, seat_id: int) -> None:
-    """Seat score = mean over every verdict on record (judges plus any outside consults)."""
-    parsed = [s for m in store.transcript(seat_id) if m["step"].startswith(("judge:", "consult:"))
-              if (s := parse_scores(m["content"]))]
-    if not parsed:
-        store.finish_seat(seat_id, "done", None, "no parseable scores")
-        return
-    score = sum(sum(s[k] for k in SCORE_KEYS) for s in parsed) / (len(parsed) * len(SCORE_KEYS))
-    store.finish_seat(seat_id, "done", round(score, 2), " | ".join(s["one_line"] for s in parsed))
+    verdicts = []
+    for row in store.transcript(seat_id):
+        if not row["step"].startswith(("judge:", "consult:")):
+            continue
+        scores = parse_scores(row["content"], legacy=True)
+        if scores:
+            # API adapters know the exact serving model; subscription CLIs may only identify the tool.
+            if not row["model"].endswith(" CLI") or not scores["judge_model"]:
+                scores["judge_model"] = row["model"]
+            verdicts.append((row["id"], row["provider"], scores))
+    store.save_verdicts(seat_id, verdicts, SCORE_KEYS)
 
 
 REVIEW_ASK = """Review it to make it stronger, not to veto it. Give: (1) the weakest link in the chain from mechanism \
@@ -87,10 +109,14 @@ to measurement, with numbers if you can; (2) the ordinary explanations a test mu
 that makes it more detectable or easier to test. Under 250 words."""
 
 SCORE_ASK = """Score it from 1 to 10 on each axis and reply with JSON only:
-{"novelty": n, "testability": n, "mechanism": n, "survives_known_data": n, "one_line": "why, in one sentence"}
+{"novelty": n, "testability": n, "mechanism": n, "survives_known_data": n, "gap_orders": integer, "loophole_class": "A|B|C|D",\n "judge_model": "your model", "one_line": "why, in one sentence"}
 novelty = new idea rather than a restatement; testability = a real experiment or dataset could decide it; \
 mechanism = every step of the chain is spelled out; survives_known_data = existing measurements do not already \
-exclude it."""
+exclude it. Score the quantitative candidate, not the polish of a rejection. Compute gap_orders as rounded
+log10(biological threshold / predicted signal) using comparable units and explain the numerical basis in
+one_line. If the true source strength is unknown, use a labeled, explicit, finite benchmark and report a conditional gap. Never use null or invent a measured source strength. Negative values mean
+above threshold. Use the class of the actual mechanism. Give low mechanism
+and survival scores if the estimate requires unsupported gain or violates measured bounds."""
 
 
 def consult_prompt(store, seat_id: int) -> str:
@@ -111,55 +137,62 @@ def consult_prompt(store, seat_id: int) -> str:
             f"Finally: {SCORE_ASK.replace('reply with JSON only', 'end with this JSON on its own line')}")
 
 
-async def work_seat(seat, providers, store, budget) -> None:
-    proposer = providers[seat.id % len(providers)]
-    critics = reviewers(providers, proposer)
-    store.start_seat(seat, proposer.name)
+def parse_screen(text):
+    data = json.loads(text.strip().removeprefix("```json").removesuffix("```").strip())
+    if data["action"] not in {"keep", "pivot", "reject"} or data["loophole_class"] not in LOOPS:
+        raise ValueError("invalid screening verdict")
+    premise = data["premise"]
+    if not isinstance(premise, str) or not premise.strip():
+        raise ValueError("missing screening premise")
+    return data
 
-    hypothesis = await ask(store, budget, proposer, seat.id, "propose", f"""{brief(seat)}
 
-Propose ONE hypothesis for how this sense could register this part of reality. Use these headings:
-Claim / Mechanism (step by step, from the unseen thing to a nerve signal or behaviour) / Size of the effect \
-(order of magnitude, and the noise it must beat) / What we would observe / How to test it with data that exists or \
-a sensor that can be built / What result would count against it.
-Under 450 words.""")
+async def work_seat(seat, providers, store, budget, router=None) -> None:
+    if router is None:
+        router = SwarmRouter()
+    index = seat.id % len(providers)
+    plan = providers[index:] + providers[:index]
+    preferred = plan[0]
+    store.start_seat(seat, preferred.name)
+    catalogue = "\n".join(f"{name}. {description}" for name, description in LOOPS.items())
+    screen, _ = await routed_ask(store, budget, plan, router, preferred, seat.id, "screen", f"""{brief(seat)}
 
-    critiques = await asyncio.gather(*(
-        ask(store, budget, c, seat.id, f"critique:{label}", f"""{brief(seat)}
+Screen the premise. Reject or pivot naive single-particle Newtonian WIMP gravity and hypotheses with no
+plausible chain to a biological signal. Keep a premise only if it fits one class below. A pivot must name an
+alternative coupling and receptor. Return only a JSON object with action (keep, pivot, or reject),
+loophole_class (one of A/B/C/D, closest class if rejected), and premise (one sentence).
+{catalogue}""")
+    verdict = parse_screen(screen)
+    if verdict["action"] == "reject":
+        store.finish_seat(seat.id, "rejected", verdict=verdict["premise"])
+        return
+    context = (f"{brief(seat)}\nScreened premise: {verdict['premise']}\n"
+               f"Class {verdict['loophole_class']}: {LOOPS[verdict['loophole_class']]}."
+               "\nTreat the screened premise as the hypothesis to evaluate.")
+    hypothesis, proposer = await routed_ask(store, budget, plan, router, preferred, seat.id, "propose", f"""{context}
 
-A colleague at {proposer.name} proposed:
-
-{hypothesis}
-
-{stance}{REVIEW_ASK}""")
-        for c, label, stance in critics))
-
-    notes = "\n\n".join(f"Review from {label}:\n{t}" for (_, label, _), t in zip(critics, critiques))
-    await ask(store, budget, proposer, seat.id, "revise", f"""{brief(seat)}
-
-Your hypothesis:
-
-{hypothesis}
-
-{notes}
-
-Rewrite the hypothesis using the same headings, taking the reviews into account. Keep what survived, fix or drop what \
-did not, and end with the single cheapest first experiment. Under 500 words.""")
-    revised = store.message(seat.id, "revise")
-
-    await asyncio.gather(*(
-        ask(store, budget, c, seat.id, f"judge:{label}", f"""{brief(seat)}
-
-Final hypothesis from {proposer.name}:
-
-{revised}
-
-{stance}{SCORE_ASK}""")
-        for c, label, stance in critics))
+Propose one testable mechanism. Trace field to receptor to behavior, estimate signal and ordinary noise,
+under an explicit finite benchmark if the actual source is unknown, and give a falsifiable prediction and
+a feasible control experiment. Under 450 words.""")
+    store.set_proposer(seat.id, proposer.name)
+    critique, critic = await routed_ask(
+        store, budget, plan, router, plan[min(1, len(plan)-1)], seat.id, "critique",
+        f"{context}\n\n{hypothesis}\n\n{REVIEW_ASK}", avoid=(proposer.name,))
+    revised, reviser = await routed_ask(
+        store, budget, plan, router, proposer, seat.id, "revise",
+        f"{context}\n\nHypothesis:\n{hypothesis}\n\nReview:\n{critique}\n\n"
+        "Revise the mechanism and bounds using the review, keep one explicit conditional numerical gap "
+        "if the source is unknown, and end with the cheapest falsification test. Under 500 words.")
+    judge, _ = await routed_ask(
+        store, budget, plan, router, plan[-1], seat.id, "judge:roundtable",
+        f"{context}\n\n{revised}\n\n{SCORE_ASK}", avoid=(proposer.name, reviser.name, critic.name))
+    if parse_scores(judge) is None:
+        raise ValueError("judge returned invalid score data")
     rescore(store, seat.id)
 
 
 async def run(seats, providers, store, budget, concurrency: int, log=print) -> dict:
+    router = SwarmRouter()
     queue: asyncio.Queue = asyncio.Queue()
     for seat in seats:
         queue.put_nowait(seat)
@@ -172,8 +205,9 @@ async def run(seats, providers, store, budget, concurrency: int, log=print) -> d
             except asyncio.QueueEmpty:
                 return
             try:
-                await work_seat(seat, providers, store, budget)
-                stats["done"] += 1
+                await work_seat(seat, providers, store, budget, router)
+                outcome = store.seat(seat.id)["status"]
+                stats[outcome] = stats.get(outcome, 0) + 1
                 stats["streak"] = 0
                 if stats["done"] % 25 == 0:
                     log(f"  {stats['done']} seats done, {budget.calls} calls, {budget.out:,} output tokens")
