@@ -130,7 +130,8 @@ py -m lab --config lab.cli.toml run --seats 6
 Imports preserve the architectural synthesis and queue new hypotheses ahead of agenda seats.
 Identical packets are deduplicated. Invalid JSON changes nothing; copy the returned JSON
 object (optionally fenced) rather than surrounding commentary. No Gemini API key or CLI is used.
-Clipboard reading requires Python with tkinter; file imports work with embedded Python too.
+Windows clipboard reading uses the native API and works with embedded Python.
+Other platforms require tkinter for clipboard reading; file imports work everywhere.
 
 The Windows rebuild includes a local Python runtime at `.runtime/python/python.exe` if
 `py` is unavailable. Use that path in place of `py` in the examples. The runtime and

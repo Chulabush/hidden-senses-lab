@@ -26,8 +26,7 @@ Generated real-data packet: `runs/gemini_brief.md`.
 
 Python was absent from PATH. A Python 3.13.9 embedded runtime was downloaded from python.org
 to ignored `.runtime/python`; use `.runtime/python/python.exe` instead of `py` on this laptop.
-The embedded runtime does not include tkinter: use file import, or a full Python installation
-with tkinter for clipboard import.
+Windows clipboard imports use the native API and do not require tkinter.
 
 ## Next commands
 

@@ -1,6 +1,7 @@
 """Manual Gemini Chat exchange. No Gemini executable, credentials, or API calls."""
 import hashlib
 import json
+import os
 from pathlib import Path
 
 from .agenda import Seat
@@ -42,6 +43,28 @@ def export_packet(store, path, top=10):
 
 
 def clipboard_text():
+    if os.name == 'nt':
+        import ctypes
+        from ctypes import wintypes
+        user, kernel = ctypes.windll.user32, ctypes.windll.kernel32
+        user.GetClipboardData.argtypes = [wintypes.UINT]
+        user.GetClipboardData.restype = wintypes.HANDLE
+        kernel.GlobalLock.argtypes = [wintypes.HANDLE]
+        kernel.GlobalLock.restype = ctypes.c_void_p
+        kernel.GlobalUnlock.argtypes = [wintypes.HANDLE]
+        if not user.OpenClipboard(None):
+            raise ValueError('Clipboard is busy; retry or import a file.')
+        try:
+            handle = user.GetClipboardData(13)  # CF_UNICODETEXT
+            pointer = kernel.GlobalLock(handle) if handle else None
+            if not pointer:
+                raise ValueError('Clipboard contains no Unicode text.')
+            try:
+                return ctypes.wstring_at(pointer)
+            finally:
+                kernel.GlobalUnlock(handle)
+        finally:
+            user.CloseClipboard()
     import tkinter
     root = tkinter.Tk()
     root.withdraw()
