@@ -5,7 +5,7 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $remote = "$User@$ServerIp"
-foreach ($name in '.claude', '.codex', '.gemini') {
+foreach ($name in '.claude', '.codex') {
     $source = Join-Path $env:USERPROFILE $name
     if (-not (Test-Path -LiteralPath $source -PathType Container)) {
         Write-Warning "Skipping missing $source"

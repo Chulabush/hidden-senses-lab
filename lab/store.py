@@ -3,6 +3,11 @@ import sqlite3
 from pathlib import Path
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS gemini_imports (
+  digest TEXT PRIMARY KEY, synthesis TEXT NOT NULL, created TEXT DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS gemini_seeds (
+  id INTEGER PRIMARY KEY, hypothesis TEXT NOT NULL, visual_system TEXT NOT NULL,
+  loophole_class TEXT NOT NULL, priority INTEGER NOT NULL DEFAULT 100);
 CREATE TABLE IF NOT EXISTS seats (
   id INTEGER PRIMARY KEY, sense TEXT, portal TEXT, role TEXT,
   proposer TEXT, status TEXT DEFAULT 'pending', score REAL, verdict TEXT, error TEXT);

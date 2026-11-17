@@ -172,7 +172,7 @@ def executable_args(executable):
     path = Path(executable)
     if os.name != "nt" or path.suffix.lower() not in {".cmd", ".bat"}:
         return [executable]
-    packages = {"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex", "gemini": "@google/gemini-cli"}
+    packages = {"claude": "@anthropic-ai/claude-code", "codex": "@openai/codex"}
     package = packages.get(path.stem.lower())
     if package:
         root = path.parent / "node_modules" / package
@@ -221,6 +221,10 @@ class CommandProvider(Provider):
             argv = [one_line if a == "{system}" else a.replace("{out}", out_file) for a in self.command]
             # Use the full path, so Windows finds npm's .cmd launchers.
             argv = executable_args(resolve_command(argv[0]) or argv[0]) + argv[1:]
+            if self.name == "codex" and "{out}" not in self.command:
+                argv += ["--skip-git-repo-check", "--color", "never", "-o", out_file, "-"]
+            elif self.name == "claude" and "--tools" not in self.command:
+                argv += ["--tools", "", "--no-session-persistence"]
             stdin = prompt if takes_system else f"{system}\n\n---\n\n{prompt}"
             async with self.procs or asyncio.Semaphore(1):
                 proc = await asyncio.create_subprocess_exec(
@@ -284,6 +288,13 @@ def build(cfg: dict, mock: bool = False) -> list[Provider]:
     out = []
     CommandProvider.procs = asyncio.Semaphore(int(cfg.get("run", {}).get("cli_processes", 2)))
     for name, pcfg in cfg["providers"].items():
+        if pcfg.get("mode") == "chat_bridge":
+            continue
+        active = cfg.get("run", {}).get("active_labs")
+        if active is not None and name not in active:
+            continue
+        if name == "gemini" and pcfg.get("kind") == "command":
+            raise SystemExit("Gemini CLI is unsupported; use mode = 'chat_bridge'.")
         if mock:
             out.append(MockProvider(name, pcfg))
             continue

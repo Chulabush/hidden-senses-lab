@@ -69,10 +69,10 @@ async def ask(store, budget, provider, seat_id, step, prompt, *, record=True) ->
 
 
 LOOPS = {
-    "A": "Mirror or atomic dark matter and kinetic mixing with specialized photoreceptors.",
+    "A": "Mirror or atomic dark matter, dark photons and kinetic mixing with mantis shrimp opsins or deep-sea multibank rods.",
     "B": "Ultralight axion wave spin resonance and cryptochrome radical pairs.",
     "C": "Coherent bosonic wave phase interference in densely packed retinal arrays.",
-    "D": "Macroscopic dark nuggets or topological defects generating transient ocular photons.",
+    "D": "Macroscopic dark nuggets or topological defects generating Cherenkov-like flashes or biophoton bursts in ocular fluid.",
 }
 
 
@@ -227,6 +227,12 @@ async def run(seats, providers, store, budget, concurrency: int, log=print) -> d
 
 
 async def synthesize(providers, lead_name, store, budget, top_k: int) -> str:
+    router = SwarmRouter()
+
+    async def synthesis_ask(provider, step, prompt):
+        text, _ = await routed_ask(store, budget, providers, router, provider, 0, step, prompt)
+        return text
+
     rows = store.top(top_k)
     if not rows:
         raise SystemExit("No scored hypotheses yet. Run `python -m lab run` first.")
@@ -237,7 +243,7 @@ async def synthesize(providers, lead_name, store, budget, top_k: int) -> str:
         f"### Seat {r['id']} (score {r['score']}, proposed by {r['proposer']})\n{r['sense']}\n{r['portal']}\n\n"
         f"{store.message(r['id'], 'revise')}" for r in rows)
 
-    draft = await ask(store, budget, lead, 0, "synthesis:draft", f"""Below are the {len(rows)} highest-scoring hypotheses \
+    draft = await synthesis_ask(lead, "synthesis:draft", f"""Below are the {len(rows)} highest-scoring hypotheses \
 from the collaboration. Write the research programme they add up to:
 1. The 3-5 recurring mechanisms, each with the seats that support it.
 2. A ranked list of the 10 experiments worth doing first: what to measure, with which animal, sensor or public dataset, \
@@ -249,13 +255,13 @@ what result would be a discovery, and rough cost (free data / bench-top / lab-sc
     if not others:
         return draft
     reviews = await asyncio.gather(*(
-        ask(store, budget, p, 0, f"synthesis:review:{p.name}", f"""{lead.name} drafted this research programme from the \
+        synthesis_ask(p, f"synthesis:review:{p.name}", f"""{lead.name} drafted this research programme from the \
 collaboration's best hypotheses. Say what is missing, what is ranked wrongly and why, and which experiment you would \
 add. Under 400 words.
 
 {draft}""") for p in others))
     notes = "\n\n".join(f"Review from {p.name}:\n{t}" for p, t in zip(others, reviews))
-    return await ask(store, budget, lead, 0, "synthesis:final", f"""Your draft programme:
+    return await synthesis_ask(lead, "synthesis:final", f"""Your draft programme:
 
 {draft}
 

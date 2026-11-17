@@ -21,6 +21,8 @@ def load(path: str) -> dict:
     load_env(cfg_path.parent / ".env")
     cfg = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
     cfg["_root"] = cfg_path.parent
+    cfg["run"] = {**cfg.get("run", {}), **cfg.get("runner", {})}
+    cfg["providers"] = cfg.get("labs", cfg.get("providers", {}))
     if not cfg.get("providers"):
         raise SystemExit(f"{path}: no [providers.*] sections")
     return cfg

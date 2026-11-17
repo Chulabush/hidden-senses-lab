@@ -9,7 +9,7 @@ if ! command -v npm >/dev/null || ! node -e 'process.exit(+process.versions.node
     curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
     sudo apt-get install -y nodejs
 fi
-npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+npm install --global --prefix "$HOME/.local" @anthropic-ai/claude-code @openai/codex
 export PATH="$HOME/.local/bin:$PATH"
 
 repo="$HOME/hidden-senses-lab"

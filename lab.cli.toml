@@ -1,5 +1,6 @@
 # Subscription CLIs take prompts on stdin.
-[run]
+[runner]
+active_labs = ["claude", "codex"]
 db = "runs/lab.sqlite"
 concurrency = 2
 cli_processes = 2
@@ -9,14 +10,13 @@ max_output_tokens = 1000000
 seed = 7
 lead = "claude"
 
-[providers.claude]
+[labs.claude]
 kind = "command"
-command = ["claude", "-p", "--output-format", "json", "--tools", "", "--no-session-persistence"]
+command = ["claude", "-p", "--output-format", "json"]
 
-[providers.codex]
+[labs.codex]
 kind = "command"
-command = ["codex", "exec", "--ephemeral", "-s", "read-only", "--skip-git-repo-check", "--ignore-user-config", "--color", "never", "-o", "{out}", "-"]
+command = ["codex", "exec", "--ephemeral", "-s", "read-only"]
 
-[providers.gemini]
-kind = "command"
-command = ["gemini", "-p", "Answer the request supplied on stdin. Do not use tools.", "--output-format", "json"]
+[labs.gemini]
+mode = "chat_bridge"

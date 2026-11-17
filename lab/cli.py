@@ -4,7 +4,7 @@ import asyncio
 import sys
 from pathlib import Path
 
-from . import agenda, config, pipeline, providers, swarm_scout
+from . import agenda, config, pipeline, providers, swarm_scout, gemini_bridge
 from .store import Store
 
 CALLS_PER_SEAT = 5  # screen, propose, critique, revise, judge
@@ -98,7 +98,8 @@ def cmd_run(cfg, args):
     picked = agenda.sample(args.seats, int(cfg["run"].get("seed", 7)), **words)
     if not picked:
         raise SystemExit("No seat matches --sense/--portal/--role. The texts to match are listed in lab/agenda.py.")
-    seats = [s for s in picked if s.id not in done]
+    seeds = gemini_bridge.pending_seats(store)
+    seats = (seeds + [s for s in picked if s.id not in done])[:args.seats]
     if not seats:
         print("All requested seats are already done. Raise --seats to go further.")
         return
@@ -115,7 +116,7 @@ def cmd_run(cfg, args):
 
 def cmd_scout(cfg, args):
     # An explicit scout worker limit also bounds the CLI subprocesses for this command.
-    cfg = {**cfg, "run": {**cfg["run"], "cli_processes": args.concurrency}}
+    cfg = {**cfg, "run": {**cfg["run"], "cli_processes": min(args.concurrency, cfg['run'].get('cli_processes', 2))}}
     store = open_store(cfg, args.mock)
     labs = ready(cfg, args)
     settings = cfg["run"]
@@ -176,6 +177,23 @@ def cmd_status(cfg, args):
         print(f"  seat {r['id']:5} normalized_score={r['score']/10:.3f}  gap_orders={r['gap_orders']}  loophole_class={r['loophole_class']}  {r['sense'].split(':')[0]}  x  {r['portal'].split(':')[0][:60]}")
 
 
+def cmd_gemini_export(cfg, args):
+    store = open_store(cfg, args.mock)
+    path = cfg['_root'] / 'runs' / 'gemini_brief.md'
+    print(f"Wrote {gemini_bridge.export_packet(store, path, args.top)}; paste into Gemini Chat.")
+
+
+def cmd_gemini_import(cfg, args):
+    store = open_store(cfg, args.mock)
+    text = (gemini_bridge.clipboard_text() if args.source == 'clipboard'
+            else Path(args.source).read_text(encoding='utf-8-sig'))
+    try:
+        count = gemini_bridge.import_packet(store, text)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise SystemExit(f'Invalid Gemini packet: {exc}') from exc
+    print(f'Imported {count} high-priority seeds; run debates to evaluate them.')
+
+
 def cmd_show(cfg, args):
     store = open_store(cfg, args.mock)
     seat = store.seat(args.seat)
@@ -212,6 +230,10 @@ def main():
     ap.add_argument("--config", default="lab.toml")
     ap.add_argument("--labs", help="use only these labs, comma-separated, e.g. claude,gemini")
     sub = ap.add_subparsers(dest="cmd", required=True)
+    ge = sub.add_parser('gemini-export', help='write a packet for the Gemini Chat app')
+    ge.add_argument('--top', type=positive_int, default=10)
+    gi = sub.add_parser('gemini-import', help='import Gemini JSON from a file or clipboard')
+    gi.add_argument('source', help='file path or literal clipboard')
     d = sub.add_parser("doctor", help="check keys and list the models each key can use")
     d.add_argument("--ping", action="store_true", help="also send one tiny request to each lab")
     p = sub.add_parser("plan", help="show the size of the agenda and of a run")
@@ -234,11 +256,12 @@ def main():
     c.add_argument("--file", help="file holding the pasted reply (default: read it from standard input)")
     for q in (s, t):
         q.add_argument("--top", type=int, default=30)
-    for q in (r, s, t, w, c, scout):
+    for q in (r, s, t, w, c, scout, ge, gi):
         q.add_argument("--mock", action="store_true", help="offline simulation, no keys, no cost")
     args = ap.parse_args()
     for stream in (sys.stdout, sys.stderr):  # model output is full of symbols a Windows console cannot encode
         stream.reconfigure(encoding="utf-8", errors="replace")
     cfg = config.load(args.config)
     {"doctor": cmd_doctor, "plan": cmd_plan, "run": cmd_run, "synthesize": cmd_synthesize,
-     "scout": cmd_scout, "status": cmd_status, "show": cmd_show, "consult": cmd_consult}[args.cmd](cfg, args)
+     "scout": cmd_scout, "status": cmd_status, "show": cmd_show, "consult": cmd_consult,
+     "gemini-export": cmd_gemini_export, "gemini-import": cmd_gemini_import}[args.cmd](cfg, args)

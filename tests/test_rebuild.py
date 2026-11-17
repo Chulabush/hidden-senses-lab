@@ -12,6 +12,33 @@ from lab.providers import MockProvider, ProviderError
 from lab.router import SwarmRouter, limit_reset
 from lab.store import Store
 from lab.swarm_scout import candidates, promotion_seats, scout
+from lab import config, providers, gemini_bridge
+
+
+class BridgeTests(unittest.TestCase):
+    def test_bridge_is_excluded_and_imports_are_prioritized_and_deduplicated(self):
+        cfg = config.load('lab.cli.toml')
+        self.assertEqual([p.name for p in providers.build(cfg)], ['claude', 'codex'])
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp) / 'lab.sqlite')
+            try:
+                packet = json.dumps({'synthesis': 'Check spin noise', 'hypotheses': [
+                    {'hypothesis': 'Resonance with sham field', 'visual_system': 'songbird retina',
+                     'loophole_class': 'B'}]})
+                self.assertEqual(gemini_bridge.import_packet(store, packet), 1)
+                self.assertEqual(gemini_bridge.import_packet(store, packet), 0)
+                seats = gemini_bridge.pending_seats(store)
+                self.assertEqual(len(seats), 1)
+                self.assertIn('Resonance', seats[0].role)
+                store.start_seat(seats[0], 'codex')
+                store.finish_seat(seats[0].id, 'done')
+                self.assertEqual(gemini_bridge.pending_seats(store), [])
+                path = gemini_bridge.export_packet(store, Path(temp) / 'brief.md')
+                self.assertIn('Open biophysical bottlenecks', path.read_text(encoding='utf-8'))
+                with self.assertRaises(ValueError):
+                    gemini_bridge.import_packet(store, '{"synthesis":"bad","hypotheses":[{}]}')
+            finally:
+                store.db.close()
 
 
 class LimitedProvider(MockProvider):
@@ -55,6 +82,16 @@ class ScoreTests(unittest.TestCase):
 
 
 class QueueTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fresh_thousand_candidate_matrix(self):
+        with tempfile.TemporaryDirectory() as temp:
+            store = Store(Path(temp) / 'lab.sqlite')
+            try:
+                result = await scout(store, [MockProvider('claude', {}), MockProvider('codex', {})],
+                                     1000, 2, 7, Budget(1000, 1_000_000))
+                self.assertEqual(result, (1000, 0))
+            finally:
+                store.db.close()
+
     async def test_migration_wal_dedup_and_promotion(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "lab.sqlite"

@@ -32,15 +32,15 @@ one and continue with the other.
 
 ### Route A: chat subscriptions (no API keys) — `lab.cli.toml`
 
-This drives each vendor's command-line tool, logged in with your subscription: `claude`, `codex`
-(ChatGPT) and `gemini`. This route needs only Python 3.11+ and the tools themselves; skip the `pip`
+This drives `claude` and `codex` with existing subscription logins. Gemini uses the manual
+Chat Bridge below and is never launched as a CLI. This route needs only Python 3.11+ and the tools; skip the `pip`
 step above. Install the tools once (needs a recent Node.js) and log in to each:
 
 ```bash
-npm install -g @anthropic-ai/claude-code @openai/codex @google/gemini-cli
+npm install -g @anthropic-ai/claude-code @openai/codex
 ```
 
-Check all three, then run a first small batch:
+Check both workers, then run a first small batch:
 
 ```bash
 python -m lab --config lab.cli.toml doctor --ping
@@ -53,7 +53,7 @@ On Windows, use `py` in place of `python`. To leave a lab out of a run (for exam
 limit resets), name the ones you want:
 
 ```bash
-python -m lab --config lab.cli.toml --labs claude,gemini run --seats 6
+python -m lab --config lab.cli.toml --labs claude,codex run --seats 6
 ```
 
 To aim a run at part of the agenda, filter by keyword (comma-separated, any one may match; the texts
@@ -65,8 +65,7 @@ python -m lab --config lab.cli.toml run --seats 6 --sense "songbirds,fruit flies
 
 No model is named in the commands, so each tool uses your subscription's default model. With a single
 lab, it reviews and scores its own hypotheses from two opposed stances (experimentalist and theorist).
-Only the Claude tool has been run for real so far; the Codex and Gemini commands were written from
-their help text and have not been exercised with a login.
+Gemini participates through the Chat Bridge, using its web or mobile app.
 
 **Bringing in another assistant by hand.** Print a ready-to-paste prompt for a seat (or `0` for the
 research programme), paste it into any chat window, then save the answer:
@@ -83,8 +82,8 @@ Their review joins the seat's conversation, and their score counts toward the se
 What to expect on this route:
 
 - **Speed:** a seat is 6 model calls and takes a few minutes. Plan on tens of seats per day, not thousands.
-- **Usage limits:** subscriptions cap usage. When a tool starts failing, the run stops after 5 failures in a
-  row; finished seats are kept and you continue later with the same command.
+- **Usage limits:** a limited worker cools down until its reported reset time (five minutes if absent).
+  The remaining worker takes all debate roles. Completed seats persist if both workers are unavailable.
 - **Memory:** one tool call peaks at roughly 250 MB. `cli_processes` in `lab.cli.toml` caps how many run at
   once (default 2, so about 0.5 GB). Set it to 1 on a very small machine.
 
@@ -118,8 +117,32 @@ stops cleanly and resumes next time. Model IDs are set per lab in `lab.toml`.
 
 ## Scout matrix and cloud runs
 
+### Gemini Chat Bridge
+
+```powershell
+py -m lab --config lab.cli.toml gemini-export --top 10
+# Paste runs/gemini_brief.md into Gemini Chat; request the JSON format in the packet.
+py -m lab --config lab.cli.toml gemini-import clipboard
+# Or: py -m lab --config lab.cli.toml gemini-import runs/gemini_reply.json
+py -m lab --config lab.cli.toml run --seats 6
+```
+
+Imports preserve the architectural synthesis and queue new hypotheses ahead of agenda seats.
+Identical packets are deduplicated. Invalid JSON changes nothing; copy the returned JSON
+object (optionally fenced) rather than surrounding commentary. No Gemini API key or CLI is used.
+Clipboard reading requires Python with tkinter; file imports work with embedded Python too.
+
+The Windows rebuild includes a local Python runtime at `.runtime/python/python.exe` if
+`py` is unavailable. Use that path in place of `py` in the examples. The runtime and
+database/backup are local ignored artifacts. `[runner]` and `[labs.*]` configure the CLI
+route; the older `[run]` and `[providers.*]` configuration remains supported.
+
+The scout matrix has 1,248 combinations (26 visual systems × 4 loops × 12 amplifiers),
+with 1,000 selected by default. Workers are asynchronous tasks, not independent OS agents.
+CLI process concurrency never exceeds `[runner].cli_processes`, even with more scout tasks.
+
 Use Python 3.11 or newer. The subscription route uses the installed `claude`, `codex`,
-and `gemini` executables. Sign into each CLI you plan to use and check it with
+executables only. Sign into both CLIs and check them with
 `py -m lab --config lab.cli.toml doctor --ping` on Windows. Missing CLIs are skipped.
 The roundtable screens each premise before proposing, critiquing, revising, and scoring it.
 A rate-limited provider stays out of rotation until the reported reset time (five minutes
